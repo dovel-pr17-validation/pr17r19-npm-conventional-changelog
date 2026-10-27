@@ -27,8 +27,8 @@ importers:
         specifier: ^21.0.0
         version: 21.0.2
       '@commitlint/config-pnpm-scopes':
-        specifier: ^21.0.0
-        version: 21.0.2
+        specifier: ^21.2.2
+        version: 21.2.2
       '@commitlint/cz-commitlint':
         specifier: ^21.0.0
         version: 21.0.2(@types/node@24.13.2)(commitizen@4.3.1(@types/node@24.13.2)(typescript@7.0.2))(inquirer@12.7.0(@types/node@24.13.2)(oxlint-tsgolint@7.0.2001))(typescript@7.0.2)
@@ -524,8 +524,8 @@ packages:
     resolution: {integrity: sha512-P/ZRhryQmkj0Z0dY9FOoRwe3xkwJyyAdtXwt01NT2kuZttcG2CNYp1q5Ci3u+nDT2jcbJRw2kt13Czl1qKNPfg==}
     engines: {node: '>=22.12.0'}
 
-  '@commitlint/config-pnpm-scopes@21.0.2':
-    resolution: {integrity: sha512-2D+VJ5NfS3xdmS8hn0kYiGXSBOHnJqAc+6GG5VCq8/1oveyqY+Hf9vf0r939EapBrfZv6RDR5Ueo0Z2U+PnA0w==}
+  '@commitlint/config-pnpm-scopes@21.2.2':
+    resolution: {integrity: sha512-wopa9LyTC55jTq+8X2XFHQvu0AEtnL6eP2VRmrzKDtehS5PtU7n374E9fIB8akBJSrI7TkfpHPmwjmZzOMdonA==}
     engines: {node: '>=22.12.0'}
 
   '@commitlint/config-validator@21.0.1':
@@ -4855,7 +4855,7 @@ snapshots:
       '@commitlint/types': 21.0.1
       conventional-changelog-conventionalcommits: 9.3.1
 
-  '@commitlint/config-pnpm-scopes@21.0.2':
+  '@commitlint/config-pnpm-scopes@21.2.2':
     dependencies:
       '@pnpm/read-project-manifest': 6.0.10
       read-yaml-file: 3.0.0
@@ -8124,12 +8124,12 @@ snapshots:
 
   read-yaml-file@2.1.0:
     dependencies:
-      js-yaml: 4.2.0
+      js-yaml: 4.3.2
       strip-bom: 4.0.0
 
   read-yaml-file@3.0.0:
     dependencies:
-      js-yaml: 4.2.0
+      js-yaml: 4.3.2
       strip-bom: 5.0.0
 
   readable-stream@3.6.2:
@@ -8998,7 +8998,7 @@ snapshots:
 
   write-yaml-file@5.0.0:
     dependencies:
-      js-yaml: 4.2.0
+      js-yaml: 4.3.2
       write-file-atomic: 5.0.1
 
   xxhash-wasm@1.1.0: {}

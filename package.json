@@ -41,7 +41,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",
     "@commitlint/config-conventional": "^21.0.0",
-    "@commitlint/config-pnpm-scopes": "^21.0.0",
+    "@commitlint/config-pnpm-scopes": "^21.2.2",
     "@commitlint/cz-commitlint": "^21.0.0",
     "@trigen/oxlint": "^10.1.1",
     "@trigen/oxlint-config": "^10.1.2",

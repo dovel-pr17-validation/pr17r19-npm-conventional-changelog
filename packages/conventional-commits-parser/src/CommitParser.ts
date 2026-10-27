@@ -1,0 +1,459 @@
+import type {
+  ParserOptions,
+  ParserRegexes,
+  CommitReference,
+  CommitNote,
+  Commit
+} from './types.js'
+import { getParserRegexes } from './regex.js'
+import {
+  trimNewLines,
+  appendLine,
+  getCommentFilter,
+  gpgFilter,
+  truncateToScissor,
+  assignMatchedCorrespondence
+} from './utils.js'
+import { defaultOptions } from './options.js'
+
+/**
+ * Helper to create commit object.
+ * @param initialData - Initial commit data.
+ * @returns Commit object with empty data.
+ */
+export function createCommitObject(initialData: Partial<Commit> = {}): Commit {
+  // @ts-expect-error: You can read properties from `Commit` without problems, but you can't assign object to this type. So here is helper for that.
+  return {
+    merge: null,
+    revert: null,
+    header: null,
+    body: null,
+    footer: null,
+    notes: [],
+    mentions: [],
+    references: [],
+    ...initialData
+  }
+}
+
+/**
+ * Commit message parser.
+ */
+export class CommitParser {
+  private readonly options: ParserOptions
+  private readonly regexes: ParserRegexes
+  private lines: string[] = []
+  private lineIndex = 0
+  private commit = createCommitObject()
+
+  constructor(options: ParserOptions = {}) {
+    this.options = {
+      ...defaultOptions,
+      ...options
+    }
+    this.regexes = getParserRegexes(this.options)
+  }
+
+  private currentLine() {
+    return this.lines[this.lineIndex]
+  }
+
+  private nextLine() {
+    return this.lines[this.lineIndex++]
+  }
+
+  private isLineAvailable() {
+    return this.lineIndex < this.lines.length
+  }
+
+  private parseReference(
+    input: string,
+    action: string | null
+  ) {
+    const { regexes } = this
+
+    if (regexes.url.test(input)) {
+      return null
+    }
+
+    const matches = regexes.referenceParts.exec(input)
+
+    if (!matches) {
+      return null
+    }
+
+    let [
+      raw,
+      repository = null,
+      prefix,
+      issue
+    ] = matches
+    let owner: string | null = null
+
+    if (repository) {
+      const slashIndex = repository.indexOf('/')
+
+      if (slashIndex !== -1) {
+        owner = repository.slice(0, slashIndex)
+        repository = repository.slice(slashIndex + 1)
+      }
+    }
+
+    return {
+      raw,
+      action,
+      owner,
+      repository,
+      prefix,
+      issue
+    }
+  }
+
+  private parseReferences(
+    input: string,
+    isFooterToken = false
+  ) {
+    const { regexes } = this
+    const referencesRegex = isFooterToken
+      ? regexes.footerReferences
+      : regexes.references
+    const regex = input.match(referencesRegex)
+      ? referencesRegex
+      : /()(.+)/gi
+    const references: CommitReference[] = []
+    let matches: RegExpExecArray | null
+    let action: string | null
+    let sentence: string
+    let reference: CommitReference | null
+
+    while (true) {
+      matches = regex.exec(input)
+
+      if (!matches) {
+        break
+      }
+
+      action = matches[1] || null
+      sentence = matches[2] || ''
+
+      while (true) {
+        reference = this.parseReference(sentence, action)
+
+        if (!reference) {
+          break
+        }
+
+        references.push(reference)
+      }
+    }
+
+    return references
+  }
+
+  private skipEmptyLines() {
+    let line = this.currentLine()
+
+    while (line !== undefined && !line.trim()) {
+      this.nextLine()
+      line = this.currentLine()
+    }
+  }
+
+  private parseMerge() {
+    const { commit, options } = this
+    const correspondence = options.mergeCorrespondence || []
+    const merge = this.currentLine()
+    const matches = merge && options.mergePattern
+      ? merge.match(options.mergePattern)
+      : null
+
+    if (matches) {
+      this.nextLine()
+
+      commit.merge = matches[0] || null
+
+      assignMatchedCorrespondence(commit, matches, correspondence)
+
+      return true
+    }
+
+    return false
+  }
+
+  private parseHeader(isMergeCommit: boolean) {
+    if (isMergeCommit) {
+      this.skipEmptyLines()
+    }
+
+    const { commit, options } = this
+    const correspondence = options.headerCorrespondence || []
+    const header = commit.header ?? this.nextLine()
+    let matches: RegExpMatchArray | null = null
+
+    if (header) {
+      if (options.breakingHeaderPattern) {
+        matches = header.match(options.breakingHeaderPattern)
+      }
+
+      if (!matches && options.headerPattern) {
+        matches = header.match(options.headerPattern)
+      }
+    }
+
+    if (header) {
+      commit.header = header
+    }
+
+    if (matches) {
+      assignMatchedCorrespondence(commit, matches, correspondence)
+    }
+  }
+
+  private parseMeta() {
+    const {
+      options,
+      commit
+    } = this
+
+    if (!options.fieldPattern || !this.isLineAvailable()) {
+      return false
+    }
+
+    let matches: RegExpMatchArray | null
+    let field: string | null = null
+    let parsed = false
+
+    while (this.isLineAvailable()) {
+      matches = this.currentLine().match(options.fieldPattern)
+
+      if (matches) {
+        field = matches[1] || null
+        this.nextLine()
+        continue
+      }
+
+      if (field) {
+        parsed = true
+        commit[field] = appendLine(commit[field], this.currentLine())
+        this.nextLine()
+      } else {
+        break
+      }
+    }
+
+    return parsed
+  }
+
+  private parseNotes() {
+    const {
+      regexes,
+      commit
+    } = this
+
+    if (!this.isLineAvailable()) {
+      return false
+    }
+
+    const matches = this.currentLine().match(regexes.notes)
+    let isFooterToken: boolean
+
+    if (matches) {
+      const note: CommitNote = {
+        title: matches[1],
+        text: matches[2]
+      }
+
+      commit.notes.push(note)
+      commit.footer = appendLine(commit.footer, this.currentLine())
+      this.nextLine()
+
+      while (this.isLineAvailable()) {
+        if (this.parseMeta()) {
+          return true
+        }
+
+        if (this.parseNotes()) {
+          return true
+        }
+
+        isFooterToken = regexes.footerToken.test(this.currentLine())
+
+        commit.references.push(
+          ...this.parseReferences(this.currentLine(), isFooterToken)
+        )
+
+        if (!isFooterToken) {
+          note.text = appendLine(note.text, this.currentLine())
+        }
+
+        commit.footer = appendLine(commit.footer, this.currentLine())
+        this.nextLine()
+
+        if (isFooterToken) {
+          break
+        }
+      }
+
+      return true
+    }
+
+    return false
+  }
+
+  private parseBodyAndFooter(isBody: boolean) {
+    const {
+      commit,
+      regexes
+    } = this
+
+    if (!this.isLineAvailable()) {
+      return isBody
+    }
+
+    const isFooterToken = regexes.footerToken.test(this.currentLine())
+    const isStillBody = !isFooterToken && isBody
+
+    commit.references.push(
+      ...this.parseReferences(this.currentLine(), isFooterToken)
+    )
+
+    if (isStillBody) {
+      commit.body = appendLine(commit.body, this.currentLine())
+    } else {
+      commit.footer = appendLine(commit.footer, this.currentLine())
+    }
+
+    this.nextLine()
+
+    return isStillBody
+  }
+
+  private parseBreakingHeader() {
+    const {
+      commit,
+      options
+    } = this
+
+    if (!options.breakingHeaderPattern || commit.notes.length || !commit.header) {
+      return
+    }
+
+    const matches = commit.header.match(options.breakingHeaderPattern)
+
+    if (matches) {
+      commit.notes.push({
+        title: 'BREAKING CHANGE',
+        text: matches[3]
+      })
+    }
+  }
+
+  private parseMentions(input: string) {
+    const {
+      commit,
+      regexes
+    } = this
+    let matches: RegExpExecArray | null
+
+    for (;;) {
+      matches = regexes.mentions.exec(input)
+
+      if (!matches) {
+        break
+      }
+
+      commit.mentions.push(matches[1])
+    }
+  }
+
+  private parseRevert(input: string) {
+    const {
+      commit,
+      options
+    } = this
+    const correspondence = options.revertCorrespondence || []
+    const matches = options.revertPattern
+      ? input.match(options.revertPattern)
+      : null
+
+    if (matches) {
+      commit.revert = assignMatchedCorrespondence({}, matches, correspondence)
+    }
+  }
+
+  private cleanupCommit() {
+    const { commit } = this
+
+    commit.body &&= trimNewLines(commit.body)
+    commit.footer &&= trimNewLines(commit.footer)
+
+    commit.notes.forEach((note) => {
+      note.text = trimNewLines(note.text)
+    })
+
+    const referencesSet = new Set<string>()
+
+    commit.references = commit.references.filter((reference) => {
+      const uid = `${reference.action} ${reference.raw}`.toLocaleLowerCase()
+      const ok = !referencesSet.has(uid)
+
+      if (ok) {
+        referencesSet.add(uid)
+      }
+
+      return ok
+    })
+  }
+
+  /**
+   * Parse commit message string into an object.
+   * @param input - Commit message string.
+   * @returns Commit object.
+   */
+  parse(input: string) {
+    if (!input.trim()) {
+      throw new TypeError('Expected a raw commit')
+    }
+
+    const { commentChar } = this.options
+    const commentFilter = getCommentFilter(commentChar)
+    const rawLines = trimNewLines(input).split(/\r?\n/)
+    const lines = commentChar
+      ? truncateToScissor(rawLines, commentChar).filter(line => commentFilter(line) && gpgFilter(line))
+      : rawLines.filter(line => gpgFilter(line))
+    const commit = createCommitObject()
+
+    this.lines = lines
+    this.lineIndex = 0
+    this.commit = commit
+
+    const isMergeCommit = this.parseMerge()
+
+    this.parseHeader(isMergeCommit)
+
+    if (commit.header) {
+      commit.references = this.parseReferences(commit.header)
+    }
+
+    let isBody = true
+
+    while (this.isLineAvailable()) {
+      this.parseMeta()
+
+      if (this.parseNotes()) {
+        isBody = false
+      }
+
+      if (!this.parseBodyAndFooter(isBody)) {
+        isBody = false
+      }
+    }
+
+    this.parseBreakingHeader()
+    this.parseMentions(input)
+    this.parseRevert(input)
+    this.cleanupCommit()
+
+    return commit
+  }
+}

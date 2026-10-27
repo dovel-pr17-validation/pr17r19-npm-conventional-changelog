@@ -1,0 +1,56 @@
+{
+  "name": "standard-changelog",
+  "type": "module",
+  "version": "8.1.0",
+  "description": "Generate a changelog from git metadata with Angular commit convention.",
+  "author": "Steve Mao",
+  "license": "MIT",
+  "homepage": "https://conventional-changelog.js.org/standard-changelog/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/conventional-changelog/conventional-changelog.git",
+    "directory": "packages/standard-changelog"
+  },
+  "bugs": {
+    "url": "https://github.com/conventional-changelog/conventional-changelog/issues"
+  },
+  "keywords": [
+    "conventional-changelog",
+    "angular",
+    "conventional",
+    "changelog",
+    "log"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": "./src/index.ts",
+  "publishConfig": {
+    "bin": {
+      "standard-changelog": "./dist/cli.js"
+    },
+    "exports": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "directory": "package",
+    "linkDirectory": false
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clear:package": "del ./package",
+    "clear:dist": "del ./dist",
+    "clear": "del ./package ./dist",
+    "prepublishOnly": "run build clear:package clean-publish",
+    "postpublish": "pnpm clear:package",
+    "build": "tsc -p tsconfig.build.json",
+    "test:types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conventional-changelog/git-client": "workspace:^",
+    "conventional-changelog-angular": "workspace:^",
+    "conventional-changelog": "workspace:^"
+  }
+}

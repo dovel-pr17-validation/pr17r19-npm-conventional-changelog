@@ -1,0 +1,65 @@
+{
+  "name": "conventional-changelog-writer",
+  "type": "module",
+  "version": "9.3.0",
+  "description": "Write logs based on conventional commits and templates.",
+  "author": {
+    "name": "Steve Mao",
+    "email": "maochenyan@gmail.com",
+    "url": "https://github.com/stevemao"
+  },
+  "license": "MIT",
+  "homepage": "https://conventional-changelog.js.org/changelog-writer/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/conventional-changelog/conventional-changelog.git",
+    "directory": "packages/conventional-changelog-writer"
+  },
+  "bugs": {
+    "url": "https://github.com/conventional-changelog/conventional-changelog/issues"
+  },
+  "keywords": [
+    "conventional-changelog-writer",
+    "changelog",
+    "conventional",
+    "commits",
+    "templates",
+    "writer",
+    "writing",
+    "logs"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": "./src/index.ts",
+  "publishConfig": {
+    "bin": {
+      "conventional-changelog-writer": "./dist/cli/index.js"
+    },
+    "exports": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "directory": "package",
+    "linkDirectory": false
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clear:package": "del ./package",
+    "clear:dist": "del ./dist",
+    "clear": "del ./package ./dist",
+    "prepublishOnly": "run build clear:package clean-publish",
+    "postpublish": "pnpm clear:package",
+    "build": "tsc -p tsconfig.build.json",
+    "test:types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conventional-changelog/template": "workspace:^",
+    "@simple-libs/stream-utils": "catalog:",
+    "argue-cli": "catalog:",
+    "conventional-commits-filter": "workspace:^",
+    "verkit": "catalog:"
+  }
+}

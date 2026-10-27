@@ -1,0 +1,629 @@
+import {
+  describe,
+  afterEach,
+  it,
+  expect
+} from 'vitest'
+import { getParserRegexes } from './regex.js'
+
+describe('conventional-commits-parser', () => {
+  describe('regex', () => {
+    describe('getParserRegexes', () => {
+      describe('notes', () => {
+        it('should match a simple note', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['Breaking News', 'Breaking Change']
+          })
+          const match = 'Breaking News: This is so important.'.match(notes)
+
+          expect(match?.[0]).toBe('Breaking News: This is so important.')
+          expect(match?.[1]).toBe('Breaking News')
+          expect(match?.[2]).toBe('This is so important.')
+        })
+
+        it('should match notes with customized pattern', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['BREAKING CHANGE', 'BREAKING-CHANGE'],
+            notesPattern: noteKeywords => new RegExp(`^[\\s|*]*(${noteKeywords})[:\\s]+(?:\\[.*\\] )(.*)`, 'i')
+          })
+          const message = 'BREAKING CHANGE: [Do not match this prefix.] This is so important.'
+          const match = message.match(notes)
+
+          expect(match?.[0]).toBe(message)
+          expect(match?.[1]).toBe('BREAKING CHANGE')
+          expect(match?.[2]).toBe('This is so important.')
+        })
+
+        it('should be case insensitive', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['Breaking News', 'Breaking Change']
+          })
+          const match = 'BREAKING NEWS: This is so important.'.match(notes)
+
+          expect(match?.[0]).toBe('BREAKING NEWS: This is so important.')
+          expect(match?.[1]).toBe('BREAKING NEWS')
+          expect(match?.[2]).toBe('This is so important.')
+        })
+
+        it('should ignore whitespace', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: [
+              ' Breaking News',
+              'Breaking Change ',
+              '',
+              ' Breaking SOLUTION ',
+              '  '
+            ],
+            issuePrefixes: ['#']
+          })
+          const match = 'Breaking News: This is so important.'.match(notes)
+
+          expect(match?.[0]).toBe('Breaking News: This is so important.')
+          expect(match?.[1]).toBe('Breaking News')
+          expect(match?.[2]).toBe('This is so important.')
+        })
+
+        it('should not accidentally match in a sentence', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: [' Breaking News'],
+            issuePrefixes: ['#']
+          })
+          const match = 'This is a breaking news: So important.'.match(notes)
+
+          expect(match).toBe(null)
+        })
+
+        it('should not match if there is text after `noteKeywords`', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['BREAKING CHANGE', 'BREAKING-CHANGE'],
+            issuePrefixes: ['#']
+          })
+          const match = 'BREAKING CHANGES: Wow.'.match(notes)
+
+          expect(match).toBe(null)
+        })
+
+        it('should not match keywords without a colon or with leading whitespace (#1515)', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['BREAKING CHANGE', 'BREAKING-CHANGE']
+          })
+
+          expect('breaking-change footers'.match(notes)).toBe(null)
+          expect('  breaking-change footers'.match(notes)).toBe(null)
+          expect('  BREAKING CHANGE: indented'.match(notes)).toBe(null)
+        })
+
+        it('should match keywords prefixed with a `* ` bullet (squash commits)', () => {
+          const { notes } = getParserRegexes({
+            noteKeywords: ['BREAKING CHANGE', 'BREAKING-CHANGE']
+          })
+          const match = '* BREAKING CHANGE: So important.'.match(notes)
+
+          expect(match?.[1]).toBe('BREAKING CHANGE')
+          expect(match?.[2]).toBe('So important.')
+          expect('* BREAKING CHANGE:'.match(notes)?.[2]).toBe('')
+        })
+
+        it('should escape regex special chars when used inside `noteKeywords`', () => {
+          const noteKeywordsSpecialChars = [
+            '[1]',
+            '(2)',
+            '{3}',
+            '.4',
+            '*5',
+            '+6',
+            '?7',
+            '^8',
+            '$9'
+          ]
+          const { notes } = getParserRegexes({
+            noteKeywords: noteKeywordsSpecialChars,
+            issuePrefixes: ['#']
+          })
+
+          noteKeywordsSpecialChars.forEach((keyword) => {
+            const match = `${keyword}: footer`.match(notes)
+
+            expect(match).toMatchObject({
+              0: `${keyword}: footer`,
+              1: keyword,
+              2: 'footer'
+            })
+          })
+        })
+      })
+
+      describe('footerToken', () => {
+        it('should match footer tokens with colon separator', () => {
+          const { footerToken } = getParserRegexes()
+
+          expect('Reviewed-by: Z').toMatch(footerToken)
+          expect('BREAKING CHANGE: changed API').toMatch(footerToken)
+          expect('BREAKING-CHANGE: changed API').toMatch(footerToken)
+        })
+
+        it('should match footer tokens with issue separator', () => {
+          const { footerToken } = getParserRegexes({
+            issuePrefixes: ['#']
+          })
+
+          expect('Fixes #1476.').toMatch(footerToken)
+          expect('Kills   #1').toMatch(footerToken)
+          expect('Refs #123').toMatch(footerToken)
+        })
+
+        it('should not match footer tokens with issue separator if issue prefixes are not configured', () => {
+          const { footerToken } = getParserRegexes()
+
+          expect('Fixes #1476.').not.toMatch(footerToken)
+          expect('Refs: #1476.').toMatch(footerToken)
+        })
+
+        it('should match footer tokens with custom issue prefixes', () => {
+          const { footerToken } = getParserRegexes({
+            issuePrefixes: ['gh-']
+          })
+
+          expect('Kills gh-1').toMatch(footerToken)
+        })
+
+        it('should not match footer-like text inside sentences', () => {
+          const { footerToken } = getParserRegexes()
+
+          expect('This fixes #1476.').not.toMatch(footerToken)
+          expect('Reviewed by: Z').not.toMatch(footerToken)
+        })
+
+        it('should not match indented `key: value` lines (#1512)', () => {
+          const { footerToken } = getParserRegexes()
+
+          expect('  dependency-version: 2.0.0').not.toMatch(footerToken)
+          expect('  dependency-type: direct:development').not.toMatch(footerToken)
+        })
+      })
+
+      describe('references', () => {
+        it('should match a simple reference', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes']
+          })
+          const match = references.exec('closes #1')
+
+          expect(match?.[0]).toBe('closes #1')
+          expect(match?.[1]).toBe('closes')
+          expect(match?.[2]).toBe('#1')
+        })
+
+        it('should be case insensitive', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes']
+          })
+          const match = references.exec('ClOsEs #1')
+
+          expect(match?.[0]).toBe('ClOsEs #1')
+          expect(match?.[1]).toBe('ClOsEs')
+          expect(match?.[2]).toBe('#1')
+        })
+
+        it('should not match if keywords does not present', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Close']
+          })
+          const match = references.exec('Closes #1')
+
+          expect(match).toBe(null)
+        })
+
+        it('should take multiple reference keywords', () => {
+          const { references } = getParserRegexes({
+            referenceActions: [
+              ' Closes',
+              'amends',
+              'fixes'
+            ]
+          })
+          const match = references.exec('amends #1')
+
+          expect(match?.[0]).to.eql('amends #1')
+          expect(match?.[1]).to.eql('amends')
+          expect(match?.[2]).toBe('#1')
+        })
+
+        it('should match multiple references', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes', 'amends']
+          })
+          const message = 'Closes #1 amends #2; closes bug #4'
+          let match = references.exec(message)
+
+          expect(match?.[0]).toBe('Closes #1 ')
+          expect(match?.[1]).toBe('Closes')
+          expect(match?.[2]).toBe('#1 ')
+
+          match = references.exec(message)
+          expect(match?.[0]).toBe('amends #2; ')
+          expect(match?.[1]).toBe('amends')
+          expect(match?.[2]).toBe('#2; ')
+
+          match = references.exec(message)
+          expect(match?.[0]).toBe('closes bug #4')
+          expect(match?.[1]).toBe('closes')
+          expect(match?.[2]).toBe('bug #4')
+        })
+
+        it('should match references with mixed content, like JIRA tickets', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes', 'amends']
+          })
+          const message = 'Closes #JIRA-123 amends #MY-OTHER-PROJECT-123; closes bug #4'
+          let match = references.exec(message)
+
+          expect(match?.[0]).toBe('Closes #JIRA-123 ')
+          expect(match?.[1]).toBe('Closes')
+          expect(match?.[2]).toBe('#JIRA-123 ')
+
+          match = references.exec(message)
+          expect(match?.[0]).toBe('amends #MY-OTHER-PROJECT-123; ')
+          expect(match?.[1]).toBe('amends')
+          expect(match?.[2]).toBe('#MY-OTHER-PROJECT-123; ')
+
+          match = references.exec(message)
+          expect(match?.[0]).toBe('closes bug #4')
+          expect(match?.[1]).toBe('closes')
+          expect(match?.[2]).toBe('bug #4')
+        })
+
+        it('should not match keywords inside words', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['fix', 'resolved']
+          })
+
+          expect('prefix #1'.match(references)).toBe(null)
+          expect('unresolved #2'.match(references)).toBe(null)
+        })
+
+        it('should not stop at words starting with a keyword', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes', 'fix']
+          })
+
+          expect('Closes #1 and fixups #2'.match(references)).toEqual(['Closes #1 and fixups #2'])
+        })
+
+        it('should not match a keyword followed by a colon', () => {
+          const { references } = getParserRegexes({
+            referenceActions: ['Closes']
+          })
+
+          expect('Closes: #1'.match(references)).toBe(null)
+        })
+
+        it('should reference an issue without an action', () => {
+          const { references } = getParserRegexes()
+          const body = 'gh-1, prefix-3, Closes gh-6'
+          const match = references.exec(body)
+
+          expect(match?.[0]).toBe(body)
+          expect(match?.[1]).toBe('')
+          expect(match?.[2]).toBe(body)
+        })
+
+        it('should ignore whitespace', () => {
+          const { references } = getParserRegexes({
+            referenceActions: [
+              ' Closes',
+              'amends ',
+              '',
+              ' fixes ',
+              '   '
+            ]
+          })
+          const match = 'closes #1, amends #2, fixes #3'.match(references)
+
+          expect(match).toEqual([
+            'closes #1, ',
+            'amends #2, ',
+            'fixes #3'
+          ])
+        })
+
+        it('should escape regex special chars when used inside `referenceActions`', () => {
+          const referenceActionsSpecialChars = [
+            '[close]',
+            '(fix)',
+            '{resolve}',
+            '.closes',
+            '*merge',
+            '+amend',
+            '?fix',
+            '^resolve',
+            '$close'
+          ]
+          const { references } = getParserRegexes({
+            referenceActions: referenceActionsSpecialChars,
+            issuePrefixes: ['#']
+          })
+
+          referenceActionsSpecialChars.forEach((action) => {
+            const match = `${action} #1`.match(references)
+
+            expect(match).toMatchObject({
+              0: `${action} #1`
+            })
+          })
+        })
+      })
+
+      describe('footerReferences', () => {
+        it('should match a keyword followed by a colon', () => {
+          const { footerReferences } = getParserRegexes({
+            referenceActions: ['Closes', 'Fixes']
+          })
+          const match = footerReferences.exec('Closes: #1')
+
+          expect(match?.[0]).toBe('Closes: #1')
+          expect(match?.[1]).toBe('Closes')
+          expect(match?.[2]).toBe('#1')
+          expect('Closes: #1 Fixes: #2'.match(footerReferences)).toEqual(['Closes: #1 ', 'Fixes: #2'])
+        })
+
+        it('should match a keyword without a colon', () => {
+          const { footerReferences } = getParserRegexes({
+            referenceActions: ['Closes']
+          })
+          const match = footerReferences.exec('Closes #1')
+
+          expect(match?.[1]).toBe('Closes')
+          expect(match?.[2]).toBe('#1')
+        })
+      })
+
+      describe('referenceParts', () => {
+        let { referenceParts } = getParserRegexes({
+          issuePrefixes: ['#']
+        })
+
+        afterEach(() => {
+          referenceParts.lastIndex = 0
+        })
+
+        it('should match simple reference parts', () => {
+          const match = referenceParts.exec('#1')
+
+          expect(match?.[0]).toBe('#1')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('#')
+          expect(match?.[3]).toBe('1')
+        })
+
+        it('should reference an issue in parenthesis', () => {
+          const body = '#27), pinned shelljs to version that works with nyc (#30)'
+          let match = referenceParts.exec(body)
+
+          expect(match?.[0]).toBe('#27')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('#')
+          expect(match?.[3]).toBe('27')
+
+          match = referenceParts.exec(body)
+          expect(match?.[0]).toBe('), pinned shelljs to version that works with nyc (#30')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('#')
+          expect(match?.[3]).toBe('30')
+        })
+
+        it('should match reference parts with something else', () => {
+          const match = referenceParts.exec('something else #1')
+
+          expect(match?.[0]).toBe('something else #1')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[3]).toBe('1')
+        })
+
+        it('should match reference parts with a repository', () => {
+          const match = referenceParts.exec('repo#1')
+
+          expect(match?.[0]).toBe('repo#1')
+          expect(match?.[1]).toBe('repo')
+          expect(match?.[3]).toBe('1')
+        })
+
+        it('should match JIRA-123 like reference parts', () => {
+          const match = referenceParts.exec('#JIRA-123')
+
+          expect(match?.[0]).toBe('#JIRA-123')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('#')
+          expect(match?.[3]).toBe('JIRA-123')
+        })
+
+        it('should match ClickUp-style reference parts ending with letters', () => {
+          const match = referenceParts.exec('#CU-123abc')
+
+          expect(match?.[0]).toBe('#CU-123abc')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('#')
+          expect(match?.[3]).toBe('CU-123abc')
+        })
+
+        it('should not match MY-€#%#&-123 mixed symbol reference parts', () => {
+          const match = referenceParts.exec('#MY-€#%#&-123')
+
+          expect(match).toBe(null)
+        })
+
+        it('should match reference parts with multiple references', () => {
+          const body = '#1 #2, something #3; repo#4'
+          let match = referenceParts.exec(body)
+
+          expect(match?.[0]).toBe('#1')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[3]).toBe('1')
+
+          match = referenceParts.exec(body)
+          expect(match?.[0]).toBe(' #2')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[3]).toBe('2')
+
+          match = referenceParts.exec(body)
+          expect(match?.[0]).toBe(', something #3')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[3]).toBe('3')
+
+          match = referenceParts.exec(body)
+          expect(match?.[0]).toBe('; repo#4')
+          expect(match?.[1]).toBe('repo')
+          expect(match?.[3]).toBe('4')
+        })
+
+        it('should match issues with customized prefix', () => {
+          const body = 'closes gh-1, amends #2, fixes prefix-3'
+
+          referenceParts = getParserRegexes({
+            issuePrefixes: ['gh-', 'prefix-']
+          }).referenceParts
+
+          let match = referenceParts.exec(body)
+
+          expect(match?.[0]).toBe('closes gh-1')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('gh-')
+          expect(match?.[3]).toBe('1')
+
+          match = referenceParts.exec(body)
+          expect(match?.[0]).toBe(', amends #2, fixes prefix-3')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('prefix-')
+          expect(match?.[3]).toBe('3')
+        })
+
+        it('should be case sensitive if set in options', () => {
+          const body = 'closes gh-1, amends GH-2, fixes #3'
+
+          referenceParts = getParserRegexes({
+            issuePrefixes: ['GH-'],
+            issuePrefixesCaseSensitive: true
+          }).referenceParts
+
+          const match = referenceParts.exec(body)
+
+          expect(match?.[0]).toBe('closes gh-1, amends GH-2')
+          expect(match?.[1]).toBe(undefined)
+          expect(match?.[2]).toBe('GH-')
+          expect(match?.[3]).toBe('2')
+        })
+
+        it('should match nothing if there is no customized prefix', () => {
+          const body = 'closes gh-1, amends #2, fixes prefix-3'
+
+          referenceParts = getParserRegexes().referenceParts
+
+          const match = referenceParts.exec(body)
+
+          expect(match).toBe(null)
+        })
+
+        it('should escape regex special chars when used inside `issuePrefixes`', () => {
+          const issuePrefixesSpecialChars = [
+            '[#]',
+            '(#)',
+            '{#}',
+            '.#',
+            '*#',
+            '+#',
+            '?#',
+            '^#',
+            '$'
+          ]
+          const { referenceParts } = getParserRegexes({
+            issuePrefixes: issuePrefixesSpecialChars
+          })
+
+          issuePrefixesSpecialChars.forEach((prefix) => {
+            const match = `${prefix}1`.match(referenceParts)
+
+            expect(match).toMatchObject({
+              0: `${prefix}1`
+            })
+          })
+        })
+      })
+
+      describe('mentions', () => {
+        it('should match basically mention', () => {
+          const body = 'Thanks!! @someone'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@someone')
+          expect(match?.[1]).toBe('someone')
+        })
+
+        it('should match mention with hyphen', () => {
+          const body = 'Thanks!! @some-one'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@some-one')
+          expect(match?.[1]).toBe('some-one')
+        })
+
+        it('should match mention with underscore', () => {
+          const body = 'Thanks!! @some_one'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@some_one')
+          expect(match?.[1]).toBe('some_one')
+        })
+
+        it('should match mention with parentheses', () => {
+          const body = 'Fix feature1 (by @someone)'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@someone')
+          expect(match?.[1]).toBe('someone')
+        })
+
+        it('should match mention with brackets', () => {
+          const body = 'Fix feature1 [by @someone]'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@someone')
+          expect(match?.[1]).toBe('someone')
+        })
+
+        it('should match mention with braces', () => {
+          const body = 'Fix feature1 {by @someone}'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@someone')
+          expect(match?.[1]).toBe('someone')
+        })
+
+        it('should match mention with angle brackets', () => {
+          const body = 'Fix feature1 by <@someone>'
+          const { mentions } = getParserRegexes()
+          const match = mentions.exec(body)
+
+          expect(match?.[0]).toBe('@someone')
+          expect(match?.[1]).toBe('someone')
+        })
+      })
+
+      describe('url', () => {
+        it('should match any URLs', () => {
+          const { url } = getParserRegexes()
+
+          expect(url.test('https://github.com/org/repo/issues/123#issuecomment-444531023')).toBe(true)
+          expect(url.test('https://github.com/org/repo#my-readme-section')).toBe(true)
+          expect(url.test('https://example.com/')).toBe(true)
+          expect(url.test('https://example.com/1#1')).toBe(true)
+        })
+      })
+    })
+  })
+})
